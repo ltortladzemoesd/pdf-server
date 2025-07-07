@@ -1,38 +1,37 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const chromium = require('chrome-aws-lambda');
+const puppeteer = require('puppeteer-core');
 const app = express();
-const port = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 app.post('/generate-pdf', async (req, res) => {
   const { html } = req.body;
 
-  if (!html) return res.status(400).send('HTML content missing');
+  try {
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath,
+      headless: chromium.headless,
+    });
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
+    const page = await browser.newPage();
+    await page.setContent(html);
+    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true });
 
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: 'networkidle0' });
+    await browser.close();
 
-  const pdf = await page.pdf({
-    format: 'A4',
-    margin: { top: '40px', bottom: '40px', left: '40px', right: '40px' },
-    displayHeaderFooter: true,
-    footerTemplate: `<div style="font-size:10px; width:100%; text-align:center;"><span class="pageNumber"></span></div>`,
-    headerTemplate: `<div></div>`,
-    printBackground: true
-  });
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename=document.pdf',
+    });
 
-  await browser.close();
-  res.set({ 'Content-Type': 'application/pdf' });
-  res.send(pdf);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('PDF generation failed.');
+  }
 });
 
-app.listen(port, () => {
-  console.log(`PDF server is running on http://localhost:${port}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
